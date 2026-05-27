@@ -1,0 +1,26 @@
+# Git
+.git/
+.gitignore
+
+# Env
+.env
+**/.env
+
+# Docs / tooling
+*.md
+bruno/
+.claude/
+
+# Java / Maven (pedidos-service)
+pedidos-service/target/
+pedidos-service/.gradle/
+pedidos-service/*.class
+pedidos-service/*.jar
+
+# Node (consumer-service)
+consumer-service/node_modules/
+consumer-service/dist/
+consumer-service/package-lock.json
+
+# Go (relay-worker)
+relay-worker/relay

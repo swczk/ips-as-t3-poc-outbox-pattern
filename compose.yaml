@@ -13,6 +13,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
     networks:
       - poc-network
     healthcheck:
@@ -84,6 +85,61 @@ services:
       - "9999:8080"
     networks:
       - poc-network
+
+  pedidos-service:
+    build:
+      context: ./pedidos-service
+      dockerfile: Dockerfile
+    container_name: poc-pedidos
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/poc_db?user=poc_user&password=poc_pass
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - poc-network
+    restart: on-failure
+
+  relay-worker:
+    build:
+      context: ./relay-worker
+      dockerfile: Dockerfile
+    container_name: poc-relay
+    environment:
+      DATABASE_URL: postgresql://poc_user:poc_pass@postgres:5432/poc_db?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      POLL_INTERVAL_MS: 1000
+      MAX_TENTATIVAS: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - poc-network
+    restart: on-failure
+
+  consumer-service:
+    build:
+      context: ./consumer-service
+      dockerfile: Dockerfile
+    container_name: poc-consumer
+    environment:
+      DATABASE_URL: postgresql://poc_user:poc_pass@postgres:5432/poc_db
+      KAFKA_BROKERS: kafka:9092
+      PEDIDOS_EVENTS_TOPIC: pedidos.events
+      CONSUMER_GROUP_ID: pedidos-consumer-group
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - poc-network
+    restart: on-failure
 
 volumes:
   postgres_data:
