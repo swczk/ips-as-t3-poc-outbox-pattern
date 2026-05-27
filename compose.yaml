@@ -6,9 +6,9 @@ services:
     container_name: poc-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: poc_db
-      POSTGRES_USER: poc_user
-      POSTGRES_PASSWORD: poc_pass
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -17,7 +17,7 @@ services:
     networks:
       - poc-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U poc_user -d poc_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,8 +40,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
-      KAFKA_NUM_PARTITIONS: 3
-      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS:-3}
+      KAFKA_LOG_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS:-168}
       KAFKA_LOG_DIRS: /var/lib/kafka/data
     ports:
       - "9092:9092"
@@ -62,7 +62,7 @@ services:
     container_name: poc-kafka-ui
     restart: unless-stopped
     environment:
-      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_NAME: ${KAFKA_UI_CLUSTER_NAME:-local}
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
       SERVER_PORT: 8080
     ports:
@@ -92,10 +92,10 @@ services:
       dockerfile: Dockerfile
     container_name: poc-pedidos
     environment:
-      DATABASE_URL: jdbc:postgresql://postgres:5432/poc_db?user=poc_user&password=poc_pass
-      PORT: 3000
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?user=${POSTGRES_USER}&password=${POSTGRES_PASSWORD}
+      PORT: ${PEDIDOS_PORT:-3000}
     ports:
-      - "3000:3000"
+      - "${PEDIDOS_PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,10 +109,12 @@ services:
       dockerfile: Dockerfile
     container_name: poc-relay
     environment:
-      DATABASE_URL: postgresql://poc_user:poc_pass@postgres:5432/poc_db?sslmode=disable
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       KAFKA_BROKERS: kafka:9092
-      POLL_INTERVAL_MS: 1000
-      MAX_TENTATIVAS: 5
+      PEDIDOS_EVENTS_TOPIC: ${PEDIDOS_EVENTS_TOPIC:-pedidos.events}
+      POLL_INTERVAL_MS: ${RELAY_POLL_INTERVAL_MS:-1000}
+      MAX_TENTATIVAS: ${RELAY_MAX_TENTATIVAS:-5}
+      RELAY_BATCH_SIZE: ${RELAY_BATCH_SIZE:-50}
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,10 +130,11 @@ services:
       dockerfile: Dockerfile
     container_name: poc-consumer
     environment:
-      DATABASE_URL: postgresql://poc_user:poc_pass@postgres:5432/poc_db
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       KAFKA_BROKERS: kafka:9092
-      PEDIDOS_EVENTS_TOPIC: pedidos.events
-      CONSUMER_GROUP_ID: pedidos-consumer-group
+      PEDIDOS_EVENTS_TOPIC: ${PEDIDOS_EVENTS_TOPIC:-pedidos.events}
+      CONSUMER_GROUP_ID: ${CONSUMER_GROUP_ID:-pedidos-consumer-group}
+      KAFKA_RETRY_COUNT: ${KAFKA_RETRY_COUNT:-5}
     depends_on:
       postgres:
         condition: service_healthy
