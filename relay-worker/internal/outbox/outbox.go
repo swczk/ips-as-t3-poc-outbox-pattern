@@ -12,15 +12,15 @@ type Evento struct {
 	Tentativas int
 }
 
-func Poll(tx *sql.Tx, maxTentativas int) ([]Evento, error) {
+func Poll(tx *sql.Tx, maxTentativas, batchSize int) ([]Evento, error) {
 	rows, err := tx.Query(`
 		SELECT id, tipo, payload, tentativas
 		FROM outbox
 		WHERE publicado = false AND tentativas < $1
 		ORDER BY criado_em ASC
-		LIMIT 50
+		LIMIT $2
 		FOR UPDATE SKIP LOCKED
-	`, maxTentativas)
+	`, maxTentativas, batchSize)
 	if err != nil {
 		return nil, err
 	}

@@ -20,10 +20,11 @@ type Relay struct {
 	db            *sql.DB
 	pub           *publisher.Publisher
 	maxTentativas int
+	batchSize     int
 }
 
-func New(db *sql.DB, pub *publisher.Publisher, maxTentativas int) *Relay {
-	return &Relay{db: db, pub: pub, maxTentativas: maxTentativas}
+func New(db *sql.DB, pub *publisher.Publisher, maxTentativas, batchSize int) *Relay {
+	return &Relay{db: db, pub: pub, maxTentativas: maxTentativas, batchSize: batchSize}
 }
 
 func (r *Relay) Poll(ctx context.Context) {
@@ -40,7 +41,7 @@ func (r *Relay) Poll(ctx context.Context) {
 		}
 	}()
 
-	eventos, err := outbox.Poll(tx, r.maxTentativas)
+	eventos, err := outbox.Poll(tx, r.maxTentativas, r.batchSize)
 	if err != nil {
 		slog.Error("falha ao consultar outbox", "erro", err)
 		return

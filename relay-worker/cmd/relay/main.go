@@ -40,10 +40,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	pub := publisher.New(cfg.KafkaBrokers, "pedidos.events")
+	pub := publisher.New(cfg.KafkaBrokers, cfg.KafkaTopic)
 	defer pub.Close()
 
-	r := relay.New(db, pub, cfg.MaxTentativas)
+	r := relay.New(db, pub, cfg.MaxTentativas, cfg.BatchSize)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
