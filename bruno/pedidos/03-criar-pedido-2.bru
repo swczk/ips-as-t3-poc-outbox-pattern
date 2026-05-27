@@ -1,0 +1,25 @@
+meta {
+  name: Teste 1 - Pedido 2
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/pedidos
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "clienteId": "{{clienteId2}}",
+    "valor": 20.00
+  }
+}
+
+tests {
+  test("pedido criado", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.estado).to.equal("CRIADO");
+  });
+}

@@ -1,0 +1,25 @@
+meta {
+  name: Teste 2 - Kafka Offline Pedido 2
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/pedidos
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "clienteId": "{{clienteId5}}",
+    "valor": 50.00
+  }
+}
+
+tests {
+  test("pedido criado mesmo com kafka offline", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.estado).to.equal("CRIADO");
+  });
+}
