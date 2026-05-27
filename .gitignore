@@ -1,0 +1,25 @@
+# Java
+pedidos-service/target/
+pedidos-service/.gradle/
+*.class
+*.jar
+
+# Go
+relay-worker/relay
+
+# Node
+consumer-service/node_modules/
+consumer-service/dist/
+
+# Env
+.env
+**/.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.iml
