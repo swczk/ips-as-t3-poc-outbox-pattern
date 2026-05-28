@@ -1,9 +1,11 @@
 name: poc-outbox-pattern
 
 services:
+  # ── Infra ──────────────────────────────────────────────────────────────────
+
   postgres:
     image: postgres:15
-    container_name: poc-postgres
+    container_name: postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -13,7 +15,9 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./db/migrations/001_add_dead_letter.sql:/docker-entrypoint-initdb.d/02_dead_letter.sql:ro
+      - ./db/migrations/002_remove_eventos_processados.sql:/docker-entrypoint-initdb.d/03_remove_eventos.sql:ro
     networks:
       - poc-network
     healthcheck:
@@ -25,7 +29,7 @@ services:
 
   kafka:
     image: apache/kafka:3.7.0
-    container_name: poc-kafka
+    container_name: kafka
     restart: unless-stopped
     environment:
       KAFKA_NODE_ID: 1
@@ -57,40 +61,27 @@ services:
       retries: 5
       start_period: 30s
 
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: poc-kafka-ui
+  redis:
+    image: redis:7-alpine
+    container_name: redis
     restart: unless-stopped
-    environment:
-      KAFKA_CLUSTERS_0_NAME: ${KAFKA_UI_CLUSTER_NAME:-local}
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
-      SERVER_PORT: 8080
-    ports:
-      - "8080:8080"
-    networks:
-      - poc-network
-    depends_on:
-      kafka:
-        condition: service_healthy
-
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: poc-dozzle
-    restart: unless-stopped
-    environment:
-      DOZZLE_ENABLE_ACTIONS: "true"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      - "9999:8080"
+      - redis_data:/data
     networks:
       - poc-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Aplicação ──────────────────────────────────────────────────────────────
 
   pedidos-service:
     build:
       context: ./pedidos-service
       dockerfile: Dockerfile
-    container_name: poc-pedidos
+    container_name: pedidos
     environment:
       DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?user=${POSTGRES_USER}&password=${POSTGRES_PASSWORD}
       PORT: ${PEDIDOS_PORT:-3000}
@@ -107,7 +98,7 @@ services:
     build:
       context: ./relay-worker
       dockerfile: Dockerfile
-    container_name: poc-relay
+    container_name: relay
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       KAFKA_BROKERS: kafka:9092
@@ -115,6 +106,8 @@ services:
       POLL_INTERVAL_MS: ${RELAY_POLL_INTERVAL_MS:-1000}
       MAX_TENTATIVAS: ${RELAY_MAX_TENTATIVAS:-5}
       RELAY_BATCH_SIZE: ${RELAY_BATCH_SIZE:-50}
+      RECOVERY_INTERVAL_MS: ${RELAY_RECOVERY_INTERVAL_MS:-10000}
+      DEAD_LETTER_TOPIC: ${DEAD_LETTER_TOPIC:-dead-letter}
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,26 +121,82 @@ services:
     build:
       context: ./consumer-service
       dockerfile: Dockerfile
-    container_name: poc-consumer
+    container_name: consumer
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       KAFKA_BROKERS: kafka:9092
       PEDIDOS_EVENTS_TOPIC: ${PEDIDOS_EVENTS_TOPIC:-pedidos.events}
       CONSUMER_GROUP_ID: ${CONSUMER_GROUP_ID:-pedidos-consumer-group}
       KAFKA_RETRY_COUNT: ${KAFKA_RETRY_COUNT:-5}
+      REDIS_URL: redis://redis:6379
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - poc-network
     restart: on-failure
 
+  # ── Ferramentas de desenvolvimento ────────────────────────────────────────
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    environment:
+      DOZZLE_ENABLE_ACTIONS: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - dozzle_data:/data
+    ports:
+      - "9999:8080"
+    networks:
+      - poc-network
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: unless-stopped
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ${KAFKA_UI_CLUSTER_NAME:-local}
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      SERVER_PORT: 8080
+    ports:
+      - "8080:8080"
+    networks:
+      - poc-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: redis-insight
+    restart: unless-stopped
+    environment:
+      RI_REDIS_HOST: redis
+      RI_REDIS_PORT: 6379
+    volumes:
+      - redis_insight_data:/data
+    ports:
+      - "5540:5540"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - poc-network
+
+
 volumes:
   postgres_data:
     driver: local
   kafka_data:
+    driver: local
+  redis_data:
+    driver: local
+  redis_insight_data:
+    driver: local
+  dozzle_data:
     driver: local
 
 networks:
