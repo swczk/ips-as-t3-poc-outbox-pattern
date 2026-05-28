@@ -1,0 +1,1 @@
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS dead_letter BOOLEAN DEFAULT false;
