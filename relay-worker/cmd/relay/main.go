@@ -6,13 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 
+	"github.com/swczk/ips-as-t3-poc-outbox-pattern/relay-worker/internal/circuit"
 	"github.com/swczk/ips-as-t3-poc-outbox-pattern/relay-worker/internal/config"
 	"github.com/swczk/ips-as-t3-poc-outbox-pattern/relay-worker/internal/publisher"
 	"github.com/swczk/ips-as-t3-poc-outbox-pattern/relay-worker/internal/relay"
@@ -23,41 +23,87 @@ func main() {
 
 	cfg := config.Load()
 
-	slog.Info("relay iniciado",
+	slog.Info("relay worker started",
 		"brokers", cfg.KafkaBrokers,
-		"poll_interval", strconv.Itoa(cfg.PollIntervalMS)+"ms",
+		"pollIntervalMs", cfg.PollIntervalMS,
+		"recoveryIntervalMs", cfg.RecoveryIntervalMS,
 	)
 
 	db, err := sql.Open("postgres", cfg.DatabaseURL)
 	if err != nil {
-		slog.Error("falha ao abrir conexão postgres", "erro", err)
+		slog.Error("failed to open postgres connection", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
 	if err := db.Ping(); err != nil {
-		slog.Error("falha ao conectar ao postgres", "erro", err)
+		slog.Error("failed to connect to postgres", "error", err)
 		os.Exit(1)
 	}
 
-	pub := publisher.New(cfg.KafkaBrokers, cfg.KafkaTopic)
+	pub := publisher.New(cfg.KafkaBrokers, cfg.DeadLetterTopic)
 	defer pub.Close()
 
-	r := relay.New(db, pub, cfg.MaxTentativas, cfg.BatchSize)
+	cb := circuit.New()
+	r := relay.New(db, pub, cfg)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
-
-	ticker := time.NewTicker(time.Duration(cfg.PollIntervalMS) * time.Millisecond)
-	defer ticker.Stop()
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 
 	for {
 		select {
-		case <-ctx.Done():
-			slog.Info("relay a encerrar")
+		case sig := <-quit:
+			slog.Info("relay worker shutting down", "signal", sig.String())
 			return
-		case <-ticker.C:
-			r.Poll(ctx)
+		default:
+		}
+
+		if cb.IsOpen() {
+			timer := time.NewTimer(time.Duration(cfg.RecoveryIntervalMS) * time.Millisecond)
+			select {
+			case sig := <-quit:
+				timer.Stop()
+				slog.Info("relay worker shutting down", "signal", sig.String())
+				return
+			case <-timer.C:
+			}
+
+			if circuit.Ping(cfg.KafkaBrokers) {
+				cb.Close()
+			} else {
+				slog.Warn("kafka still unavailable — waiting for recovery")
+			}
+			continue
+		}
+
+		// ciclo normal — corre em goroutine para permitir graceful shutdown
+		done := make(chan bool, 1)
+		go func() {
+			done <- r.Poll(context.Background())
+		}()
+
+		var shouldOpen bool
+		select {
+		case sig := <-quit:
+			// aguarda o ciclo actual antes de sair
+			slog.Info("relay worker shutting down — waiting for current cycle", "signal", sig.String())
+			<-done
+			return
+		case shouldOpen = <-done:
+		}
+
+		if shouldOpen {
+			cb.Open()
+			continue
+		}
+
+		timer := time.NewTimer(time.Duration(cfg.PollIntervalMS) * time.Millisecond)
+		select {
+		case sig := <-quit:
+			timer.Stop()
+			slog.Info("relay worker shutting down", "signal", sig.String())
+			return
+		case <-timer.C:
 		}
 	}
 }

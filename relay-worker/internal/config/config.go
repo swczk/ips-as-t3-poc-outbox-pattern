@@ -7,22 +7,26 @@ import (
 )
 
 type Config struct {
-	DatabaseURL    string
-	KafkaBrokers   string
-	KafkaTopic     string
-	PollIntervalMS int
-	MaxTentativas  int
-	BatchSize      int
+	DatabaseURL        string
+	KafkaBrokers       string
+	KafkaTopic         string
+	DeadLetterTopic    string
+	PollIntervalMS     int
+	RecoveryIntervalMS int
+	MaxTentativas      int
+	BatchSize          int
 }
 
 func Load() Config {
 	return Config{
-		DatabaseURL:    mustEnv("DATABASE_URL"),
-		KafkaBrokers:   mustEnv("KAFKA_BROKERS"),
-		KafkaTopic:     mustEnv("PEDIDOS_EVENTS_TOPIC"),
-		PollIntervalMS: envInt("POLL_INTERVAL_MS", 1000),
-		MaxTentativas:  envInt("MAX_TENTATIVAS", 5),
-		BatchSize:      envInt("RELAY_BATCH_SIZE", 50),
+		DatabaseURL:        mustEnv("DATABASE_URL"),
+		KafkaBrokers:       mustEnv("KAFKA_BROKERS"),
+		KafkaTopic:         mustEnv("PEDIDOS_EVENTS_TOPIC"),
+		DeadLetterTopic:    envStr("DEAD_LETTER_TOPIC", "dead-letter"),
+		PollIntervalMS:     envInt("POLL_INTERVAL_MS", 1000),
+		RecoveryIntervalMS: envInt("RECOVERY_INTERVAL_MS", 10000),
+		MaxTentativas:      envInt("MAX_TENTATIVAS", 5),
+		BatchSize:          envInt("RELAY_BATCH_SIZE", 50),
 	}
 }
 
@@ -33,6 +37,13 @@ func mustEnv(key string) string {
 		os.Exit(1)
 	}
 	return v
+}
+
+func envStr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func envInt(key string, fallback int) int {

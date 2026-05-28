@@ -12,7 +12,13 @@ type Evento struct {
 	Tentativas int
 }
 
-func Poll(tx *sql.Tx, maxTentativas, batchSize int) ([]Evento, error) {
+func Poll(db *sql.DB, maxTentativas, batchSize int) ([]Evento, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	rows, err := tx.Query(`
 		SELECT id, tipo, payload, tentativas
 		FROM outbox
@@ -34,15 +40,34 @@ func Poll(tx *sql.Tx, maxTentativas, batchSize int) ([]Evento, error) {
 		}
 		eventos = append(eventos, e)
 	}
-	return eventos, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return eventos, tx.Commit()
 }
 
-func IncrementTentativas(tx *sql.Tx, id string) error {
-	_, err := tx.Exec(`UPDATE outbox SET tentativas = tentativas + 1 WHERE id = $1`, id)
+func IncrTentativasReturning(db *sql.DB, id string) (int, error) {
+	var n int
+	err := db.QueryRow(
+		`UPDATE outbox SET tentativas = tentativas + 1 WHERE id = $1 RETURNING tentativas`,
+		id,
+	).Scan(&n)
+	return n, err
+}
+
+func MarkPublicado(db *sql.DB, id string) error {
+	_, err := db.Exec(
+		`UPDATE outbox SET publicado = true, publicado_em = NOW(), tentativas = tentativas + 1 WHERE id = $1`,
+		id,
+	)
 	return err
 }
 
-func MarkPublicado(tx *sql.Tx, id string) error {
-	_, err := tx.Exec(`UPDATE outbox SET publicado = true, publicado_em = NOW() WHERE id = $1`, id)
+func MarkDeadLetter(db *sql.DB, id string) error {
+	_, err := db.Exec(
+		`UPDATE outbox SET publicado = true, dead_letter = true WHERE id = $1`,
+		id,
+	)
 	return err
 }
