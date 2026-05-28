@@ -1,49 +1,46 @@
 # Outbox Pattern — PoC
 
-Prova de conceito do Outbox Pattern com 3 serviços independentes.
+Proof of concept of the Outbox Pattern with 3 independent services.
 
-## Serviços
+```
+┌─────────────────┐    ┌──────────────┐    ┌───────────────┐
+│  pedidos-service│───▶│  outbox (DB) │───▶│ relay-worker  │───▶ Kafka
+│     (Java)      │    │  (Postgres)  │    │    (Go)       │
+└─────────────────┘    └──────────────┘    └───────────────┘
+                                                                      │
+                                                        ┌─────────────▼──────────┐
+                                                        │   consumer-service     │
+                                                        │     (Node.js/TS)       │
+                                                        │  idempotency → Redis   │
+                                                        └────────────────────────┘
+```
 
-| Serviço           | Linguagem  | Responsabilidade                        |
-|-------------------|------------|-----------------------------------------|
-| pedidos-service   | Java       | API HTTP + persistência atómica         |
-| relay-worker      | Go         | Lê outbox e publica no Kafka            |
-| consumer-service  | Node.js    | Consome eventos, garante idempotência   |
+## Services
 
-## Arranque rápido
+| Service          | Language                    | Responsibility                                               |
+|------------------|-----------------------------|--------------------------------------------------------------|
+| pedidos-service  | Java 17 / Spring Boot 3.2.5 | HTTP API + atomic write of order + outbox event              |
+| relay-worker     | Go 1.26.3                   | Outbox polling → Kafka publish + circuit breaker + dead letter |
+| consumer-service | Node.js >=22.13 / TS        | Consumes Kafka events, idempotency via Redis                 |
 
-### Pré-requisitos
-- Docker + Docker Compose
-- Java 17+, Maven 3.9+
-- Go 1.21+
-- Node.js 22+, pnpm
+## Patterns
 
-### Infra
+| Pattern          | Service(s)                   | Description                                                   |
+|------------------|------------------------------|---------------------------------------------------------------|
+| Transactional Outbox | pedidos-service          | Order and outbox event written in the same DB transaction     |
+| Polling Publisher    | relay-worker             | Polls `outbox` table and publishes pending events to Kafka    |
+| Circuit Breaker      | relay-worker             | Lazy ping on publish failure; suspends polling while Kafka is unreachable |
+| Dead Letter Queue    | relay-worker             | Events exceeding `MAX_TENTATIVAS` are forwarded to a DLQ topic |
+| Idempotent Consumer  | consumer-service         | Redis `SET NX EX` deduplicates redelivered Kafka messages     |
+
+## Quick Start
+
 ```bash
+cp .env.example .env
 docker compose up -d
 ```
 
-### Schema
-```bash
-PGPASSWORD=poc_pass psql -h localhost -p 5432 -U poc_user -d poc_db \
-  -f db/schema.sql
-```
-
-### Serviços (3 terminais)
-```bash
-# Terminal 1 — Pedidos (Java)
-cd pedidos-service
-DATABASE_URL=jdbc:postgresql://localhost:5432/poc_db?user=poc_user&password=poc_pass \
-  mvn spring-boot:run
-
-# Terminal 2 — Relay (Go)
-cd relay-worker && go run main.go
-
-# Terminal 3 — Consumer (Node.js)
-cd consumer-service && pnpm install && pnpm run dev
-```
-
-### Testar
+Test:
 ```bash
 curl -s -X POST http://localhost:3000/pedidos \
   -H "Content-Type: application/json" \
@@ -52,8 +49,27 @@ curl -s -X POST http://localhost:3000/pedidos \
 
 ## Interfaces
 
-| Serviço       | URL                      |
-|---------------|--------------------------|
-| API Pedidos   | http://localhost:3000    |
-| Kafka UI      | http://localhost:8080    |
-| Dozzle        | http://localhost:9999    |
+| Service       | URL                   |
+|---------------|-----------------------|
+| Orders API    | http://localhost:3000 |
+| Kafka UI      | http://localhost:8080 |
+| Redis Insight | http://localhost:5540 |
+| Dozzle        | http://localhost:9999 |
+
+## Environment Variables
+
+Copy `.env.example` to `.env`. Key variables:
+
+| Variable               | Service        | Default          |
+|------------------------|----------------|------------------|
+| `DATABASE_URL`         | pedidos, relay | required         |
+| `KAFKA_BROKERS`        | relay, consumer| required         |
+| `PEDIDOS_EVENTS_TOPIC` | relay, consumer| required         |
+| `DEAD_LETTER_TOPIC`    | relay          | `dead-letter`    |
+| `MAX_TENTATIVAS`       | relay          | `5`              |
+| `RELAY_BATCH_SIZE`     | relay          | `50`             |
+| `POLL_INTERVAL_MS`     | relay          | `1000`           |
+| `RECOVERY_INTERVAL_MS` | relay          | `10000`          |
+| `CONSUMER_GROUP_ID`    | consumer       | `pedidos-consumer-group` |
+| `KAFKA_RETRY_COUNT`    | consumer       | `5`              |
+| `REDIS_URL`            | consumer       | `redis://localhost:6379` |
