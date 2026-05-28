@@ -9,6 +9,8 @@ import java.util.UUID;
 @Table(name = "pedidos")
 public class Pedido {
 
+    public static final String ESTADO_CRIADO = "CRIADO";
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -20,16 +22,31 @@ public class Pedido {
     private BigDecimal valor;
 
     @Column(nullable = false)
-    private String estado = "CRIADO";
+    private String estado = ESTADO_CRIADO;
 
-    @Column(name = "criado_em")
-    private OffsetDateTime criadoEm = OffsetDateTime.now();
+    @Column(name = "criado_em", nullable = false)
+    private OffsetDateTime criadoEm;
+
+    @PrePersist
+    void prePersist() {
+        if (estado == null) {
+            estado = ESTADO_CRIADO;
+        }
+        if (criadoEm == null) {
+            criadoEm = OffsetDateTime.now();
+        }
+    }
 
     public UUID getId() { return id; }
+
     public UUID getClienteId() { return clienteId; }
     public void setClienteId(UUID clienteId) { this.clienteId = clienteId; }
+
     public BigDecimal getValor() { return valor; }
     public void setValor(BigDecimal valor) { this.valor = valor; }
+
     public String getEstado() { return estado; }
+    public void setEstado(String estado) { this.estado = estado; }
+
     public OffsetDateTime getCriadoEm() { return criadoEm; }
 }
